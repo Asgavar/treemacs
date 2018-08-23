@@ -62,17 +62,24 @@ MORE-PROPERTIES can arbitrarily appended for quick retrieval later."
                      :depth depth
                      ,@more-properties)))
 
-(cl-defmacro treemacs-define-leaf-node (name icon)
+(cl-defmacro treemacs-define-leaf-node (name icon &key ret-action)
   "Define a type of node that is a leaf and cannot be further expanded.
+
 Based on the given NAME this macro will define a `treemacs-%s-state' state
 variable and a `treemacs-%s-icon' icon variable.
-The ICON is a string that should be created with `treemacs-as-icon'."
+
+The ICON is a string that should be created with `treemacs-as-icon'.
+
+RET-ACTION is a function reference that will be invoked when RET is pressed on
+a node of this type."
   (declare (indent 1))
   (let ((state-name (intern (format "treemacs-%s-state" name)))
         (icon-name  (intern (format "treemacs-%s-icon" name))))
     `(progn
        (defvar ,state-name ',state-name)
-       (defvar ,icon-name ,icon))))
+       (defvar ,icon-name ,icon)
+       ,(when ret-action
+          `(treemacs-define-RET-action ,state-name ,ret-action)))))
 
 (cl-defmacro treemacs-define-expandable-node
     (name &key
