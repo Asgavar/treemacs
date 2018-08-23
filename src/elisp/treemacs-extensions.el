@@ -147,6 +147,37 @@ bound under the name `item'. The form itself should end in a call to
                             :state ,closed-state-name
                             'face ,face))))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun treemacs--get-buffer-groups ()
+  "Get the list of buffers, grouped by their major mode."
+  (->> (buffer-list)
+       (--reject (eq ?\ (aref (buffer-name it) 0)))
+       (--group-by (buffer-local-value 'major-mode it))))
+
+(treemacs-define-leaf-node buffer-leaf
+  (treemacs-as-icon "• " 'face 'font-lock-builtin-face))
+
+(treemacs-define-expandable-node buffer-group
+  :icon-open (treemacs-as-icon "- " 'face 'font-lock-string-face)
+  :icon-closed (treemacs-as-icon "+ " 'face 'font-lock-string-face)
+  :query-function (button-get btn :buffers)
+  :render-action
+  (treemacs-render-node treemacs-buffer-leaf-icon (buffer-name item)
+    treemacs-buffer-leaf-state
+    'font-lock-doc-face))
+
+(treemacs-define-expandable-node buffers-root
+  :icon-open (treemacs-as-icon "- " 'face 'font-lock-string-face)
+  :icon-closed (treemacs-as-icon "+ " 'face 'font-lock-string-face)
+  :query-function (treemacs--get-buffer-groups)
+  :root ("Buffers" font-lock-type-face)
+  :render-action
+  (treemacs-render-node treemacs-icon-buffer-group-closed (symbol-name (car item))
+    treemacs-buffer-group-closed-state
+    'font-lock-keyword-face
+    :buffers (cdr item)))
+
 (provide 'treemacs-extensions)
 
 ;;; treemacs-extensions.el ends here
