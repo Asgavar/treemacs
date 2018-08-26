@@ -44,7 +44,8 @@
   treemacs--goto-tag-button-at)
 
 (treemacs-import-functions-from "treemacs"
-  treemacs-refresh)
+  treemacs-refresh
+  treemacs-select-window)
 
 (treemacs-import-functions-from "treemacs-branch-creation"
   treemacs--add-root-element
@@ -396,6 +397,28 @@ failed."
             (treemacs--expand-dir-node btn :git-future git-future))
           (setq index (1+ index))))
       btn)))
+
+(defun treemacs--reload-window-and-buffer ()
+  "Reload the treemacs buffer (and window) after a workspace switch."
+  (let ((window-visible? nil)
+        (buffer-exists? nil))
+    (pcase (treemacs-current-visibility)
+      ('visible
+       (setq window-visible? t
+             buffer-exists? t))
+      ('exists
+       (setq buffer-exists? t)))
+    (when window-visible?
+      (delete-window (treemacs-get-local-window)))
+    (when buffer-exists?
+      (kill-buffer (treemacs-get-local-buffer)))
+    (when buffer-exists?
+      (let ((treemacs-follow-after-init nil)
+            (treemacs-follow-mode nil))
+        (ignore treemacs-follow-mode)
+        (treemacs-select-window)))
+    (when (not window-visible?)
+      (bury-buffer))))
 
 (defun treemacs--canonical-path (path)
   "The canonical version of PATH for being handled by treemacs.

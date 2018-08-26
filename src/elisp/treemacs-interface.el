@@ -698,6 +698,10 @@ For slower scrolling see `treemacs-previous-line-other-window'"
     ('user-cancel
      (ignore))
     (`(success ,deleted ,_)
+     (treemacs-run-in-every-buffer
+      (when (eq (treemacs-current-workspace) deleted)
+        (treemacs--find-workspace)
+        (treemacs--reload-window-and-buffer)))
      (treemacs-pulse-on-success "Workspace %s was deleted."
        (propertize (treemacs-workspace->name deleted) 'face 'font-lock-type-face)))))
 
@@ -708,24 +712,7 @@ For slower scrolling see `treemacs-previous-line-other-window'"
     ('only-one-workspace
      (treemacs-pulse-on-failure "There are no other workspaces to select."))
     (`(success ,workspace)
-     (let ((window-visible? nil)
-           (buffer-exists? nil))
-       (pcase (treemacs-current-visibility)
-         ('visible
-          (setq window-visible? t
-                buffer-exists? t))
-         ('exists
-          (setq buffer-exists? t)))
-       (when window-visible?
-         (delete-window (treemacs-get-local-window)))
-       (when buffer-exists?
-         (kill-buffer (treemacs-get-local-buffer)))
-       (when buffer-exists?
-         (let ((treemacs-follow-after-init nil)
-               (treemacs-follow-mode nil))
-           (treemacs-select-window)))
-       (when (not window-visible?)
-         (bury-buffer)))
+     (treemacs--reload-window-and-buffer)
      (treemacs-pulse-on-success "Selected workspace %s."
        (propertize (treemacs-workspace->name workspace))))))
 

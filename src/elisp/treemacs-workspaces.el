@@ -195,7 +195,6 @@ Return values may be as follows:
                                            (propertize (treemacs-workspace->name to-delete)
                                                        'face 'font-lock-type-face)))))
         (cl-return-from body 'user-cancel))
-      ;; TODO re-render
       (setq treemacs--workspaces (delete to-delete treemacs--workspaces))
       (treemacs--persist)
       `(success ,to-delete ,treemacs--workspaces))))
