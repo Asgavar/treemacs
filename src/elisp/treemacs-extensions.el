@@ -33,7 +33,13 @@ Optionally include MORE-PROPERTIES (like `face' or `display')."
   (declare (indent 1))
   (apply #'propertize string 'icon t more-properties))
 
-(defmacro treemacs-render-node (icon label-form state face &rest more-properties)
+(cl-defmacro treemacs-render-node
+    (&key icon
+          label-form
+          state
+          face
+          key-form
+          more-properties)
   "Macro that produces the strings required to render a single treemacs node.
 To be used as a `:render-action' for `treemacs-define-expandable-node'.
 
@@ -49,8 +55,11 @@ STATE is the symbol that will identify the type of the node.
 
 FACE is its face.
 
-MORE-PROPERTIES can arbitrarily appended for quick retrieval later."
-  (declare (indent 2))
+KEY-FORM is the form to will give the node a unique key, necessary for
+compatiblity and integration with follow-mode and filewatch-mode.
+
+MORE-PROPERTIES is a plist that can arbitrarily appended for quick retrieval
+later."
   `(list prefix ,icon
          (propertize ,label-form
                      'button '(t)
@@ -60,6 +69,7 @@ MORE-PROPERTIES can arbitrarily appended for quick retrieval later."
                      :state ,state
                      :parent btn
                      :depth depth
+                     :key ,key-form
                      ,@more-properties)))
 
 (cl-defmacro treemacs-define-leaf-node (name icon &key ret-action)
@@ -98,7 +108,12 @@ provide the list of elements that will be rendered with RENDER-ACTION.
 RENDER-ACTION is another form that will render the single items provided by
 QUERY-FUNCTION. For every RENDER-FORM invocation the element to be rendered is
 bound under the name `item'. The form itself should end in a call to
-`treemacs-render-node'."
+`treemacs-render-node'.
+
+ROOT is a special form, only needed for the definition of top-level nodes. It is
+a list of 3 elements: the root node's label, its face and its key-form. This
+special provision is necessary for root nodes, as they are not rendered by means
+of another extension function calling `treemacs-render-node'."
   (declare (indent 1))
   (let ((open-icon-name    (intern (concat "treemacs-icon-" (symbol-name name) "-open")))
         (closed-icon-name  (intern (concat "treemacs-icon-" (symbol-name name) "-closed")))
@@ -127,7 +142,10 @@ bound under the name `item'. The form itself should end in a call to
                :nodes items
                :depth depth
                :node-name item
-               :node-action ,render-action)))))
+               :node-action ,render-action)
+              :post-open-action
+              (treemacs-on-expand
+               (button-get btn :key) btn (-some-> (button-get btn :parent) (button-get :key)))))))
 
        (defun ,collapse-name (_)
          ,(format "Collapse treemacs nodes of type `%s'." name)
@@ -135,24 +153,26 @@ bound under the name `item'. The form itself should end in a call to
            (treemacs--button-close
             :button btn
             :new-state ',closed-state-name
-            :new-icon ,closed-icon-name)))
+            :new-icon ,closed-icon-name
+            :post-close-action
+            (treemacs-on-collapse (treemacs--tags-path-of btn)))))
 
        (treemacs-define-TAB-action ',open-state-name #',collapse-name)
        (treemacs-define-TAB-action ',closed-state-name #',expand-name)
 
        ,(when root
-          (-let [(label face) root]
+          (-let [(label face key-form) root]
             `(cl-defun ,(intern (format "treemacs--render-%s-node" name)) (&optional (depth 0) parent)
                (insert
                 ,closed-icon-name
                 (propertize ,label
                             'button '(t)
                             'category 'default-button
-                            'state ,closed-state-name
+                            'face ,face
+                            :key ,key-form
                             :depth depth
                             :parent parent
-                            :state ,closed-state-name
-                            'face ,face))))))))
+                            :state ,closed-state-name))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -162,28 +182,44 @@ bound under the name `item'. The form itself should end in a call to
        (--reject (eq ?\ (aref (buffer-name it) 0)))
        (--group-by (buffer-local-value 'major-mode it))))
 
+(defun treemacs--visit-buffer (_)
+  "Switch to buffer saved in node at point."
+  (let* ((btn (treemacs-current-button))
+         (buf (button-get btn :buffer)))
+    (when (buffer-live-p buf)
+      (select-window (next-window))
+      (switch-to-buffer buf))))
+
 (treemacs-define-leaf-node buffer-leaf
-  (treemacs-as-icon "• " 'face 'font-lock-builtin-face))
+  (treemacs-as-icon "• " 'face 'font-lock-builtin-face)
+  :ret-action #'treemacs--visit-buffer)
 
 (treemacs-define-expandable-node buffer-group
   :icon-open (treemacs-as-icon "- " 'face 'font-lock-string-face)
   :icon-closed (treemacs-as-icon "+ " 'face 'font-lock-string-face)
   :query-function (button-get btn :buffers)
   :render-action
-  (treemacs-render-node treemacs-buffer-leaf-icon (buffer-name item)
-    treemacs-buffer-leaf-state
-    'font-lock-doc-face))
+  (treemacs-render-node
+   :icon treemacs-buffer-leaf-icon
+   :label-form (buffer-name item)
+   :state treemacs-buffer-leaf-state
+   :face 'font-lock-doc-face
+   :key-form item
+   :more-properties (:buffer item)))
 
 (treemacs-define-expandable-node buffers-root
   :icon-open (treemacs-as-icon "- " 'face 'font-lock-string-face)
   :icon-closed (treemacs-as-icon "+ " 'face 'font-lock-string-face)
   :query-function (treemacs--get-buffer-groups)
-  :root ("Buffers" font-lock-type-face)
+  :root ("Buffers" 'font-lock-type-face 'Buffers)
   :render-action
-  (treemacs-render-node treemacs-icon-buffer-group-closed (symbol-name (car item))
-    treemacs-buffer-group-closed-state
-    'font-lock-keyword-face
-    :buffers (cdr item)))
+  (treemacs-render-node
+   :icon treemacs-icon-buffer-group-closed
+   :label-form (symbol-name (car item))
+   :state treemacs-buffer-group-closed-state
+   :face 'font-lock-keyword-face
+   :key-form (car item)
+   :more-properties (:buffers (cdr item))))
 
 (provide 'treemacs-extensions)
 
