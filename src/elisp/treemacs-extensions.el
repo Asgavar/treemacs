@@ -27,6 +27,40 @@
 (eval-when-compile
   (require 'cl-lib))
 
+(defvar treemacs--project-start-extensions nil)
+(defvar treemacs--project-end-extensions nil)
+
+(defun treemacs-define-extension (ext pos)
+  "Define an extension for treemacs to use.
+EXT is an extension function, as created by `treemacs-define-expandable-node'
+when a `:root' argument is given.
+POS is either `project-start' or `project-end', indicating whether the
+extension should be rendered as the first or last element of a project.
+
+See also `treemacs-remove-extension'."
+  (pcase pos
+    ('project-start (add-to-list 'treemacs--project-start-extensions ext))
+    ('project-end   (add-to-list 'treemacs--project-end-extensions ext))
+    (other          (error "Invalid extension point value `%s'" other))))
+
+(defun treemacs-remove-extension (ext pos)
+  "Remove an extension EXT at position POS.
+See also `treemacs-define-extension'."
+  (pcase pos
+    ('project-start (setq treemacs--project-start-extensions (delete ext treemacs--project-start-extensions)))
+    ('project-end   (setq treemacs--project-end-extensions   (delete ext treemacs--project-end-extensions)))
+    (other          (error "Invalid extension point value `%s'" other))))
+
+(defun treemacs--apply-project-start-extensions (project-btn)
+  "Apply the extension for PROJECT-BTN at the start of the project."
+  (dolist (ext treemacs--project-start-extensions)
+    (funcall ext project-btn)))
+
+(defun treemacs--apply-project-end-extensions (project-btn)
+  "Apply the extension for PROJECT-BTN at the end of the project."
+  (dolist (ext treemacs--project-end-extensions)
+    (funcall ext project-btn)))
+
 (defsubst treemacs-as-icon (string &rest more-properties)
   "Turn STRING into an icon for treemacs.
 Optionally include MORE-PROPERTIES (like `face' or `display')."
@@ -119,58 +153,95 @@ of another extension function calling `treemacs-render-node'."
         (closed-icon-name  (intern (concat "treemacs-icon-" (symbol-name name) "-closed")))
         (open-state-name   (intern (concat "treemacs-" (symbol-name name) "-open-state")))
         (closed-state-name (intern (concat "treemacs-" (symbol-name name) "-closed-state")))
-        (expand-name       (intern (concat "treemacs--expand-" (symbol-name name))))
-        (collapse-name     (intern (concat "treemacs--collapse-" (symbol-name name)))))
+        (expand-name       (intern (concat "treemacs-expand-" (symbol-name name))))
+        (collapse-name     (intern (concat "treemacs-collapse-" (symbol-name name))))
+        (do-expand-name    (intern (concat "treemacs--do-expand-" (symbol-name name))))
+        (do-collapse-name  (intern (concat "treemacs--do-collapse-" (symbol-name name)))))
     `(progn
        (defvar ,open-icon-name ,icon-open)
        (defvar ,closed-icon-name ,icon-closed)
        (defvar ,open-state-name ',open-state-name)
        (defvar ,closed-state-name ',closed-state-name)
 
-       (defun ,expand-name (_)
-         ,(format "Expand treemacs nodes of type `%s'." name)
-         (-when-let (btn (treemacs-current-button))
-           (let ((items ,query-function)
-                 (depth (1+ (button-get btn :depth))))
-             (treemacs--button-open
-              :button btn
-              :new-state ',open-state-name
-              :new-icon ,open-icon-name
-              :immediate-insert t
-              :open-action
-              (treemacs--create-buttons
-               :nodes items
-               :depth depth
-               :node-name item
-               :node-action ,render-action)
-              :post-open-action
-              (treemacs-on-expand
-               (button-get btn :key) btn (-some-> (button-get btn :parent) (button-get :key)))))))
+       (add-to-list 'treemacs--open-node-states ,open-state-name)
+       (add-to-list 'treemacs--closed-node-states ,closed-state-name)
 
-       (defun ,collapse-name (_)
-         ,(format "Collapse treemacs nodes of type `%s'." name)
-         (-when-let (btn (treemacs-current-button))
-           (treemacs--button-close
+       (defun ,expand-name (&optional _)
+         ,(format "Expand treemacs nodes of type `%s'." name)
+         (interactive)
+         (cl-block body
+           (-let [btn (treemacs-current-button)]
+             (when (null btn)
+               (cl-return-from body
+                 (treemacs-pulse-on-failure "There is nothing to do here.")))
+             (when (not (eq ',closed-state-name (button-get btn :state)))
+               (cl-return-from body
+                 (treemacs-pulse-on-failure "This function cannot expand a node of type '%s'."
+                   (propertize (format "%s" (button-get btn :state)) 'face 'font-lock-type-face))))
+             (,do-expand-name btn))))
+
+       (defun ,do-expand-name (btn)
+         ,(format "Execute expansion of treemacs nodes of type `%s'." name)
+         (let ((items ,query-function)
+               (depth (1+ (button-get btn :depth))))
+           (treemacs--button-open
             :button btn
-            :new-state ',closed-state-name
-            :new-icon ,closed-icon-name
-            :post-close-action
-            (treemacs-on-collapse (treemacs--tags-path-of btn)))))
+            :new-state ',open-state-name
+            :new-icon ,open-icon-name
+            :immediate-insert t
+            :open-action
+            (treemacs--create-buttons
+             :nodes items
+             :depth depth
+             :node-name item
+             :node-action ,render-action)
+            :post-open-action
+            (progn
+              (treemacs-on-expand
+               (button-get btn :key) btn (-some-> (button-get btn :parent) (button-get :key)))
+              (treemacs--reopen-node btn)))))
+
+       (defun ,collapse-name (&optional _)
+         ,(format "Collapse treemacs nodes of type `%s'." name)
+         (interactive)
+         (cl-block body
+           (-let [btn (treemacs-current-button)]
+             ;; TODO(2018/09/02): automate return from as macro
+             (when (null btn)
+               (cl-return-from body
+                 (treemacs-pulse-on-failure "There is nothing to do here.")))
+             (when (not (eq ',open-state-name (button-get btn :state)))
+               (cl-return-from body
+                 (treemacs-pulse-on-failure "This function cannot collapse a node of type '%s'."
+                   (propertize (format "%s" (button-get btn :state)) 'face 'font-lock-type-face))))
+             (,do-collapse-name btn))))
+
+       (defun ,do-collapse-name (btn)
+         ,(format "Collapse treemacs nodes of type `%s'." name)
+         (treemacs--button-close
+          :button btn
+          :new-state ',closed-state-name
+          :new-icon ,closed-icon-name
+          :post-close-action
+          (treemacs-on-collapse (button-get btn :key))))
 
        (treemacs-define-TAB-action ',open-state-name #',collapse-name)
        (treemacs-define-TAB-action ',closed-state-name #',expand-name)
 
        ,(when root
           (-let [(label face key-form) root]
-            `(cl-defun ,(intern (format "treemacs--render-%s-node" name)) (&optional (depth 0) parent)
+            `(cl-defun ,(intern (format "treemacs-%s-extensions" (upcase (symbol-name name)))) (parent)
                (insert
+                "\n"
+                (s-repeat treemacs-indentation treemacs-indentation-string)
                 ,closed-icon-name
                 (propertize ,label
                             'button '(t)
                             'category 'default-button
                             'face ,face
                             :key ,key-form
-                            :depth depth
+                            :depth 1
+                            :no-git t
                             :parent parent
                             :state ,closed-state-name))))))))
 
@@ -220,6 +291,9 @@ of another extension function calling `treemacs-render-node'."
    :face 'font-lock-keyword-face
    :key-form (car item)
    :more-properties (:buffers (cdr item))))
+
+(treemacs-define-extension #'treemacs-BUFFERS-ROOT-extensions 'project-start)
+(treemacs-define-extension #'treemacs-BUFFERS-ROOT-extensions 'project-end)
 
 (provide 'treemacs-extensions)
 

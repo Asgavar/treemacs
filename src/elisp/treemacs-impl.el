@@ -104,6 +104,20 @@
 
 (declare-function treemacs-mode "treemacs-mode")
 
+(defvar treemacs--closed-node-states
+  '(root-node-closed
+    dir-node-closed
+    file-node-closed
+    tag-node-closed)
+  "TODO.")
+
+(defvar treemacs--open-node-states
+  '(root-node-open
+    dir-node-open
+    file-node-open
+    tag-node-open)
+  "TODO.")
+
 (defvar treemacs--buffer-access nil
   "Alist mapping treemacs buffers to frames.")
 
@@ -501,9 +515,6 @@ Add a project for ROOT if it's non-nil."
                (treemacs--canonical-path)
                (treemacs-do-add-project-to-workspace))
          (treemacs-with-writable-buffer
-          (with-no-warnings
-            (treemacs--render-buffers-root-node)
-            (insert "\n\n"))
           (let* ((projects (treemacs-workspace->projects (treemacs-current-workspace)))
                  (last-index (1- (length projects))))
             (--each projects
